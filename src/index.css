@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+    --font-serif: "Cormorant Garamond", serif;
+    --font-sans: "Montserrat", sans-serif;
+}
+
+@import './styles/fonts.css';
+@import './styles/theme.css';
+@import 'slick-carousel/slick/slick.css';
+@import 'slick-carousel/slick/slick-theme.css';
+
+@layer base {
+    html {
+        scroll-behavior: smooth;
+    }
+
+    body {
+        @apply font-sans;
+    }
+}
