@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Plus, Pencil, Trash2, Image as ImageIcon, X, Save, ArrowLeft, LogOut, Lock, User } from 'lucide-react';
 import { toast } from 'sonner';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import { supabase } from '../../../lib/supabase';
 
 interface Project {
     id: number;
@@ -14,7 +15,7 @@ interface Project {
     color: string;
 }
 
-const API_URL = '/api';
+const STORAGE_BUCKET = 'product-images';
 
 export function AdminPanel() {
     const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -24,84 +25,91 @@ export function AdminPanel() {
     const [isEditing, setIsEditing] = useState(false);
     const [currentProject, setCurrentProject] = useState<Partial<Project>>({});
     const [uploading, setUploading] = useState(false);
-    const navigate = useNavigate();
 
     useEffect(() => {
-        const token = localStorage.getItem('adminToken');
-        if (token) {
-            setIsLoggedIn(true);
-            fetchProjects(token);
-        }
+        supabase.auth.getSession().then(({ data }) => {
+            const session = data.session;
+            setIsLoggedIn(!!session);
+            if (session) fetchProjects();
+        });
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+            setIsLoggedIn(!!session);
+            if (session) fetchProjects();
+        });
+        return () => subscription.unsubscribe();
     }, []);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        console.log('Attempting login to:', `${API_URL}/login`);
+        const user = username.trim();
+        const pass = password.trim();
+        const email = user.includes('@') ? user : `${user}@lisboaleather.com`;
         try {
-            const response = await fetch(`${API_URL}/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password }),
-            });
-            const data = await response.json();
-            console.log('Login response:', data);
-            if (response.ok) {
-                localStorage.setItem('adminToken', data.token);
-                setIsLoggedIn(true);
-                fetchProjects(data.token);
-                toast.success('Login realizado com sucesso');
-            } else {
-                toast.error(data.error || 'Erro ao fazer login');
+            const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+            if (error) {
+                if (error.message === 'Invalid login credentials') {
+                    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password: pass });
+                    if (!signUpError && signUpData.session) {
+                        toast.success('Conta criada e login realizado!');
+                        return;
+                    }
+                    if (!signUpError && signUpData.user && !signUpData.session) {
+                        toast.info('Verifique seu email para confirmar. Ou em Supabase: Authentication > Providers > desative "Confirm email".');
+                        return;
+                    }
+                }
+                toast.error('Usuário ou senha incorretos. Crie o admin em Supabase: Authentication > Users > Add user (email: admin@lisboaleather.com / senha: admin123)');
+                return;
             }
-        } catch (error) {
-            console.error('Login connection error:', error);
-            toast.error('Erro de conexão com o servidor');
+            toast.success('Login realizado com sucesso');
+        } catch (err) {
+            toast.error('Erro ao fazer login');
         }
     };
 
-    const handleLogout = () => {
-        localStorage.removeItem('adminToken');
-        setIsLoggedIn(false);
+    const handleLogout = async () => {
+        await supabase.auth.signOut();
         toast.info('Sessão encerrada');
     };
 
-    const fetchProjects = async (token: string) => {
-        try {
-            const response = await fetch(`${API_URL}/products`);
-            const data = await response.json();
-            setProjects(data);
-        } catch (error) {
-            toast.error('Erro ao carregar produtos');
-        }
-    };
+    const fetchProjects = async () => {
+        const { data, error } = await supabase
+            .from('products')
+            .select('id, name, description, material, dimensions, details, image, color, nome, descricao, imagem')
+            .order('created_at', { ascending: false });
 
-    const getAuthHeaders = () => ({
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`,
-        'Content-Type': 'application/json'
-    });
+        if (error) {
+            toast.error('Erro ao carregar produtos');
+            return;
+        }
+        const parsed = (data || []).map((p: any) => ({
+            ...p,
+            name: p.name ?? p.nome ?? '',
+            description: p.description ?? p.descricao ?? '',
+            image: p.image ?? p.imagem ?? '',
+            details: Array.isArray(p.details) ? p.details : []
+        }));
+        setProjects(parsed);
+    };
 
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         setUploading(true);
-        const formData = new FormData();
-        formData.append('image', file);
-
         try {
-            const response = await fetch(`${API_URL}/admin/upload`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('adminToken')}` },
-                body: formData,
-            });
-            const data = await response.json();
-            if (response.ok) {
-                setCurrentProject({ ...currentProject, image: data.imageUrl });
-                toast.success('Imagem enviada com sucesso');
-            } else {
-                toast.error('Erro ao enviar imagem');
+            const ext = file.name.split('.').pop() || 'jpg';
+            const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+            const { data, error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, { upsert: true });
+
+            if (error) {
+                toast.error('Erro ao enviar imagem. Crie o bucket "' + STORAGE_BUCKET + '" no Supabase Storage.');
+                return;
             }
-        } catch (error) {
+            const { data: { publicUrl } } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(data.path);
+            setCurrentProject(prev => ({ ...prev, image: publicUrl }));
+            toast.success('Imagem enviada com sucesso');
+        } catch {
             toast.error('Erro ao enviar imagem');
         } finally {
             setUploading(false);
@@ -114,48 +122,43 @@ export function AdminPanel() {
             return;
         }
 
-        const method = currentProject.id ? 'PUT' : 'POST';
-        const url = currentProject.id
-            ? `${API_URL}/admin/products/${currentProject.id}`
-            : `${API_URL}/admin/products`;
+        const payload = {
+            name: currentProject.name,
+            description: currentProject.description ?? '',
+            material: currentProject.material ?? '',
+            dimensions: currentProject.dimensions ?? '',
+            details: currentProject.details ?? [],
+            image: currentProject.image,
+            color: currentProject.color ?? '',
+        };
 
         try {
-            const response = await fetch(url, {
-                method,
-                headers: getAuthHeaders(),
-                body: JSON.stringify(currentProject),
-            });
-
-            if (response.ok) {
-                toast.success(currentProject.id ? 'Produto atualizado' : 'Produto criado');
-                setIsEditing(false);
-                setCurrentProject({});
-                fetchProjects(localStorage.getItem('adminToken')!);
-            } else if (response.status === 401 || response.status === 403) {
-                handleLogout();
+            if (currentProject.id) {
+                const { error } = await supabase.from('products').update(payload).eq('id', currentProject.id);
+                if (error) throw error;
+                toast.success('Produto atualizado');
+            } else {
+                const { error } = await supabase.from('products').insert(payload);
+                if (error) throw error;
+                toast.success('Produto criado');
             }
-        } catch (error) {
-            toast.error('Erro ao salvar produto');
+            setIsEditing(false);
+            setCurrentProject({});
+            fetchProjects();
+        } catch (err: any) {
+            toast.error(err?.message || 'Erro ao salvar produto');
         }
     };
 
     const handleDelete = async (id: number) => {
         if (!confirm('Tem certeza que deseja excluir este produto?')) return;
-
         try {
-            const response = await fetch(`${API_URL}/admin/products/${id}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('adminToken')}` }
-            });
-
-            if (response.ok) {
-                toast.success('Produto excluído');
-                fetchProjects(localStorage.getItem('adminToken')!);
-            } else if (response.status === 401 || response.status === 403) {
-                handleLogout();
-            }
-        } catch (error) {
-            toast.error('Erro ao excluir produto');
+            const { error } = await supabase.from('products').delete().eq('id', id);
+            if (error) throw error;
+            toast.success('Produto excluído');
+            fetchProjects();
+        } catch (err: any) {
+            toast.error(err?.message || 'Erro ao excluir produto');
         }
     };
 
@@ -173,6 +176,7 @@ export function AdminPanel() {
                             <input
                                 type="text"
                                 placeholder="Usuário"
+                                autoComplete="username"
                                 className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-rose-400 focus:outline-none transition-all"
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
@@ -207,7 +211,6 @@ export function AdminPanel() {
 
     return (
         <div className="min-h-screen bg-gray-50 flex flex-col">
-            {/* Admin Header */}
             <header className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center sticky top-0 z-10">
                 <div className="flex items-center gap-4">
                     <Link to="/" className="text-gray-500 hover:text-gray-900 transition-colors">
@@ -279,7 +282,6 @@ export function AdminPanel() {
                 </div>
             </main>
 
-            {/* Modal is same as before but uses headers for save */}
             {isEditing && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -358,7 +360,7 @@ export function AdminPanel() {
 
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Imagem do Produto</label>
-                                <div className="mt-1 flex items-center gap-4">
+                                <div className="mt-1 flex flex-wrap items-center gap-4">
                                     <div className="w-24 h-24 bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center border border-dashed border-gray-300">
                                         {currentProject.image ? (
                                             <img src={currentProject.image} alt="Preview" className="w-full h-full object-cover" />
@@ -366,10 +368,20 @@ export function AdminPanel() {
                                             <ImageIcon className="h-8 w-8 text-gray-400" />
                                         )}
                                     </div>
-                                    <label className="bg-white border border-gray-300 px-4 py-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors text-sm font-medium">
-                                        {uploading ? 'Enviando...' : 'Alterar Foto'}
-                                        <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
-                                    </label>
+                                    <div className="flex flex-col gap-2">
+                                        <label className="bg-white border border-gray-300 px-4 py-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors text-sm font-medium">
+                                            {uploading ? 'Enviando...' : 'Enviar Foto (Supabase Storage)'}
+                                            <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
+                                        </label>
+                                        <span className="text-xs text-gray-500">Ou cole a URL da imagem abaixo</span>
+                                        <input
+                                            type="url"
+                                            placeholder="https://..."
+                                            value={currentProject.image || ''}
+                                            onChange={(e) => setCurrentProject({ ...currentProject, image: e.target.value })}
+                                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                                        />
+                                    </div>
                                 </div>
                             </div>
 
@@ -380,7 +392,7 @@ export function AdminPanel() {
                                     onChange={(e) => setCurrentProject({ ...currentProject, details: e.target.value.split('\n').filter(l => l.trim()) })}
                                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none"
                                     rows={4}
-                                    placeholder="Ex: Alça removível&#10;Forro de cetim"
+                                    placeholder="Alça removível&#10;Forro de cetim"
                                 />
                             </div>
                         </div>

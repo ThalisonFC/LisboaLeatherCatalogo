@@ -1,8 +1,6 @@
-import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Sparkles, Shield, Heart } from 'lucide-react';
 import { ImageWithFallback } from './figma/ImageWithFallback';
-import { supabase } from '../../lib/supabase';
 
 interface Bag {
   id: number;
@@ -15,36 +13,55 @@ interface Bag {
   color: string;
 }
 
-interface CatalogProps {
-  onRequestInfo: () => void;
-}
+const bags: Bag[] = [
+  {
+    id: 1,
+    name: 'Bella Rosa',
+    description: 'Uma bolsa tiracolo elegante que combina sofisticação e praticidade para o dia a dia.',
+    material: 'Couro legítimo italiano',
+    dimensions: '28cm x 20cm x 8cm',
+    details: [
+      'Fecho magnético premium',
+      'Forro em suede rosa',
+      'Alça ajustável em corrente dourada',
+      'Bolso interno com zíper',
+    ],
+    image: 'https://images.unsplash.com/photo-1635865933730-e5817b5680cd?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxiZWlnZSUyMGxlYXRoZXIlMjBwdXJzZSUyMG1pbmltYWx8ZW58MXx8fHwxNzcyMjI2NjUwfDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral',
+    color: 'Rosa Claro',
+  },
+  {
+    id: 2,
+    name: 'Clássica Lisboa',
+    description: 'Design atemporal inspirado nas ruas charmosas de Lisboa. Perfeita para todas as ocasiões.',
+    material: 'Couro natural português',
+    dimensions: '35cm x 30cm x 12cm',
+    details: [
+      'Compartimentos organizadores',
+      'Fecho com zíper duplo',
+      'Alças reforçadas em couro',
+      'Base com pés metálicos protetores',
+    ],
+    image: 'https://images.unsplash.com/photo-1760624294514-ca40aafe3d96?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxicm93biUyMGxlYXRoZXIlMjBjcm9zc2JvZHklMjBiYWd8ZW58MXx8fHwxNzcyMjI2NjUxfDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral',
+    color: 'Caramelo',
+  },
+  {
+    id: 3,
+    name: 'Mademoiselle',
+    description: 'Sofisticação francesa em cada detalhe. Uma bolsa que expressa feminilidade e requinte.',
+    material: 'Couro premium aveludado',
+    dimensions: '32cm x 25cm x 10cm',
+    details: [
+      'Acabamento em ouro rosé',
+      'Forro em tecido jacquard',
+      'Alça de mão e tiracolo incluídas',
+      'Porta-cartões integrado',
+    ],
+    image: 'https://images.unsplash.com/photo-1682745230951-8a5aa9a474a0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjcmVhbSUyMGxlYXRoZXIlMjBoYW5kYmFnJTIwZWxlZ2FudHxlbnwxfHx8fDE3NzIyMjY2NTF8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral',
+    color: 'Creme',
+  },
+];
 
-export function Catalog({ onRequestInfo }: CatalogProps) {
-  const [bags, setBags] = useState<Bag[]>([]);
-
-  useEffect(() => {
-    const fetchBags = async () => {
-      const { data, error } = await supabase
-        .from('products')
-        .select('id, name, description, material, dimensions, details, image, color, created_at, nome, descricao, imagem')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Erro ao carregar catálogo do Supabase:', error);
-        return;
-      }
-      const parsedData = (data || []).map((bag: any) => {
-        const name = bag.name ?? bag.nome ?? '';
-        const description = bag.description ?? bag.descricao ?? '';
-        const image = bag.image ?? bag.imagem ?? '';
-        const details = Array.isArray(bag.details) ? bag.details : (typeof bag.details === 'string' ? JSON.parse(bag.details || '[]') : []);
-        return { ...bag, name, description, image, details };
-      });
-      setBags(parsedData);
-    };
-
-    fetchBags();
-  }, []);
+export function Catalog() {
   return (
     <section id="catalogo" className="py-20 bg-white">
       <div className="container mx-auto px-6">
@@ -74,8 +91,9 @@ export function Catalog({ onRequestInfo }: CatalogProps) {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.7, delay: index * 0.2 }}
-              className={`flex flex-col ${index % 2 === 0 ? 'lg:flex-row' : 'lg:flex-row-reverse'
-                } gap-12 items-center`}
+              className={`flex flex-col ${
+                index % 2 === 0 ? 'lg:flex-row' : 'lg:flex-row-reverse'
+              } gap-12 items-center`}
             >
               {/* Image */}
               <div className="w-full lg:w-1/2">
@@ -85,6 +103,9 @@ export function Catalog({ onRequestInfo }: CatalogProps) {
                     alt={bag.name}
                     className="w-full h-[500px] object-cover transition-transform duration-700 group-hover:scale-105"
                   />
+                  <div className="absolute top-6 right-6 bg-white/95 backdrop-blur-sm px-4 py-2 rounded-full">
+                    <span className="text-sm font-medium text-rose-500">{bag.color}</span>
+                  </div>
                 </div>
               </div>
 
@@ -124,10 +145,7 @@ export function Catalog({ onRequestInfo }: CatalogProps) {
                 </div>
 
                 {/* CTA Button */}
-                <button
-                  onClick={onRequestInfo}
-                  className="mt-6 bg-gradient-to-r from-rose-400 to-pink-500 text-white px-8 py-3 rounded-full font-medium hover:shadow-lg hover:shadow-rose-300/50 transition-all text-center"
-                >
+                <button className="mt-6 bg-gradient-to-r from-rose-400 to-pink-500 text-white px-8 py-3 rounded-full font-medium hover:shadow-lg hover:shadow-rose-300/50 transition-all">
                   Solicitar Informações
                 </button>
               </div>
